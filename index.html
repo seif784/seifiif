@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>نظام حضور وانصراف - Kiosk + QR + Dashboard</title>
+
+  <!-- Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700&display=swap" rel="stylesheet">
+
+  <!-- Libs -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+
+  <style>
+    :root{
+      --bg1:#0f2027;--bg2:#2c5364;--accent:#00c2ff;--green:#2ecc71;--red:#ff4d4f;--orange:#ffb84d;--card:rgba(255,255,255,.05);--glass:rgba(255,255,255,.06);--text:#eef6f7
+    }
+    .app{height:100vh;display:flex;flex-direction:column}
+    main{flex:1;display:flex;gap:20px;padding:20px;box-sizing:border-box}
+    .kiosk{flex:1;background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01));border-radius:14px;padding:18px;display:flex;flex-direction:column;align-items:stretch;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+    .kiosk-top{display:flex;gap:18px;align-items:flex-start}
+    .clock-box{flex:0 0 260px;background:var(--card);padding:18px;border-radius:12px;text-align:center}
+    .clock-time{font-size:40px;font-weight:700}
+    .clock-date{opacity:.9;margin-top:8px}
+    .kiosk-right{flex:1;display:flex;flex-direction:column;gap:12px}
+    .scanner-card{background:var(--glass);border-radius:12px;padding:12px;display:flex;gap:12px;align-items:center}
+    #video{width:280px;height:210px;border-radius:8px;object-fit:cover;background:#000}
+    .scanner-info{flex:1}
+    .employee-card{display:flex;gap:12px;align-items:center;padding:12px;border-radius:10px;background:linear-gradient(90deg,rgba(255,255,255,.02),rgba(255,255,255,.01))}
+    .emp-photo{width:88px;height:88px;border-radius:12px;background:#111;flex-shrink:0;object-fit:cover}
+    .emp-meta{flex:1;text-align:right}
+    .emp-meta h3{margin:0;font-size:18px}
+    .emp-meta p{margin:3px 0;opacity:.95;font-size:14px}
+    .kiosk-actions{display:flex;gap:10px;align-items:center;margin-top:8px}
+    .btn{padding:12px 18px;border-radius:10px;border:none;cursor:pointer;font-weight:700}
+    .btn-primary{background:linear-gradient(90deg,var(--accent),#00ffa1);color:#012}
+    .btn-secondary{background:rgba(255,255,255,.06);color:var(--text)}
+    .dashboard{width:480px;display:flex;flex-direction:column;gap:12px}
+    .card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.35);min-height:120px}
+    .stats{display:flex;gap:12px}
+    .stat{flex:1;padding:12px;border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,.02),transparent);text-align:center}
+    .stat h4{margin:0;font-size:22px}
+    .stat p{margin:6px 0 0;opacity:.9}
+    .list{max-height:260px;overflow:auto}
+    table{width:100%;border-collapse:collapse;color:var(--text)}
+    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,.04);font-size:13px;text-align:right}
+    th{opacity:.9}
+    footer{padding:10px 20px;text-align:center;color:rgba(255,255,255,.6);font-size:13px}
+    @media(max-width:980px){main{flex-direction:column;padding:12px}.dashboard{width:100%}}
+    .flash{position:fixed;left:50%;top:18%;transform:translateX(-50%);padding:18px 24px;border-radius:12px;font-weight:700;background:rgba(0,0,0,.6);color:#fff;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.6);display:none}
+    .flash.show{display:block;animation:pop .45s ease}
+    @keyframes pop{from{transform:translateX(-50%) scale(.9);opacity:0}to{transform:translateX(-50%) scale(1);opacity:1}}
+  </style>
+</head>
+<body>
+  <div div class="content" id="AttendancDeeparts">
+    <header>
+      <div class="logo">
+        <svg width="38" height="38" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="#00c2ff"/><path d="M7 12h10M12 7v10" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <div>
+          <h1>نظام الحضور والإنصراف الذكي</h1>
+          <div style="opacity:.8;font-size:13px">QR • Camera • Real-time • Multi-company</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <select id="companySelect" style="padding:8px;border-radius:8px;background:rgba(255,255,255,.04);color:var(--text);border:none">
+          <option value="">-- اختر الشركة --</option>
+        </select>
+        <button class="btn btn-secondary" id="toggleViewBtn">عرض Kiosk فقط</button>
+        <button class="btn btn-secondary" id="reopenCam">إعادة الكاميرا</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- Kiosk area -->
+      <section class="kiosk" aria-label="Kiosk">
+        <div class="kiosk-top">
+          <div class="clock-box">
+            <div id="bigClock" class="clock-time">00:00:00</div>
+            <div id="bigDate" class="clock-date">-- -- ----</div>
+            <div style="margin-top:8px;font-size:12px;opacity:.9">حالة النظام: <span id="systemStatus">جاهز</span></div>
+          </div>
+
+          <div class="kiosk-right">
+            <div class="scanner-card">
+              <!-- معاينة الكاميرا للمسح -->
+              <video id="video" autoplay playsinline muted></video>
+
+              <!-- معلومات وإدخال يدوي + توليد QR للتجربة -->
+              <div class="scanner-info">
+                <input id="manualCode" placeholder="ادخل كود الموظف يدوياً"
+                  style="padding:10px;border-radius:8px;background:transparent;border:1px solid rgba(255,255,255,.06);color:var(--text);width:320px;text-align:right" />
+                <div style="margin-top:10px;display:flex;gap:8px;justify-content:flex-end">
+                  <button class="btn btn-primary" id="btnIn">✅ دخول</button>
+                  <button class="btn btn-primary" id="btnOut">🚪 خروج</button>
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px;align-items:center;justify-content:flex-end">
+                  <canvas id="qrCanvas" width="180" height="180" style="background:#fff;border-radius:8px"></canvas>
+                  <div style="opacity:.85;font-size:12px">QR تجريبي (يتحدّث كل 3 ث)</div>
+                </div>
+              </div>
+            </div>
+
+            <div id="employeePreview" class="employee-card" style="margin-top:12px;display:none">
+              <img id="empPhoto" class="emp-photo" src="" alt="صورة الموظف" />
+              <div class="emp-meta">
+                <h3 id="empName">اسم الموظف</h3>
+                <p id="empJob">المسمى الوظيفي • القسم</p>
+                <p id="empStatusLine" style="margin-top:6px"></p>
+              </div>
+            </div>
+
+            <div class="kiosk-actions" style="justify-content:flex-end">
+              <button class="btn btn-secondary" id="clearPreview">مسح</button>
+              <button class="btn btn-secondary" id="toggleStats">إظهار/إخفاء الإحصائيات</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="last-records card" style="margin-top:16px;">
+          <h3 style="margin:0 0 8px 0;text-align:right">آخر الحركات (اليوم)</h3>
+          <div id="recentList" style="text-align:right;direction:rtl" class="list"></div>
+        </div>
+      </section>
+
+      <!-- Dashboard -->
+      <aside class="dashboard" aria-label="Dashboard">
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div style="text-align:left">
+              <button class="btn btn-primary" id="exportCSV">⬇️ تصدير CSV</button>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:13px;opacity:.9">الإحصائيات اللحظية</div>
+              <div style="font-weight:800;font-size:18px" id="todayLabel">اليوم</div>
+            </div>
+          </div>
+
+          <div style="height:12px"></div>
+
+          <div class="stats">
+            <div class="stat"><h4 id="statPresent">0</h4><p>حضور</p></div>
+            <div class="stat"><h4 id="statLate">0</h4><p>متأخرين</p></div>
+            <div class="stat"><h4 id="statOut">0</h4><p>انصراف</p></div>
+            <div class="stat"><h4 id="statEarly">0</h4><p>انصراف مبكر</p></div>
+          </div>
+        </div>
+
+        <div class="card" style="height:260px">
+          <h3 style="margin:0 0 8px 0;text-align:right">حضور آخر 7 أيام</h3>
+          <div style="height:200px">
+            <canvas id="chart"></canvas>
+          </div>
+        </div>
+
+        <div class="card" style="padding-bottom:6px">
+          <h3 style="margin:0 0 8px 0;text-align:right">قائمة الحضور اليومي</h3>
+          <div style="overflow:auto;max-height:320px">
+            <table id="reportTable" style="width:100%">
+              <thead>
+                <tr>
+                  <th>الموظف</th>
+                  <th>كود</th>
+                  <th>دخول</th>
+                  <th>حالة الدخول</th>
+                  <th>خروج</th>
+                  <th>حالة الخروج</th>
+                </tr>
+              </thead>
+              <tbody id="reportBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </aside>
+    </main>
+
+    <footer>مصمم بواسطة نظامك • تأكد من إعدادات Firebase وقواعد الأمان ومسارات العقد (companies, basicDefinitions, hrEmployees, attendance).</footer>
+  </div>
+
+  <div id="flash" class="flash"></div>
+
+  <!-- Main Script -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getDatabase, ref, set, get, onValue, update } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    // ========= Firebase config (استبدل بالقيم الخاصة بمشروعك) =========
+    const firebaseConfig = {
+      apiKey: "AIzaSyAF9nwrWjUwdSs2P12L3B4hOnY4EfXwbDc",
+      authDomain: "broker-94a9d.firebaseapp.com",
+      databaseURL: "https://broker-94a9d-default-rtdb.firebaseio.com",
+      projectId: "broker-94a9d",
+      storageBucket: "broker-94a9d.appspot.com",
+      messagingSenderId: "1084195654856",
+      appId: "1:1084195654856:web:f2f442380c37dda7b769fd",
+      measurementId: "G-BPMF7PRG0G"
+    };
+    // ===================================================================
+
+    const app = initializeApp(firebaseConfig);
+    const database = getDatabase(app);
+        const db = getDatabase(app);
+
+     // UI refs
+    const bigClock = document.getElementById('bigClock');
+    const bigDate = document.getElementById('bigDate');
+    const systemStatus = document.getElementById('systemStatus');
+    const video = document.getElementById('video');
+    const manualCode = document.getElementById('manualCode');
+    const btnIn = document.getElementById('btnIn');
+    const btnOut = document.getElementById('btnOut');
+    const empPreview = document.getElementById('employeePreview');
+    const empPhoto = document.getElementById('empPhoto');
+    const empName = document.getElementById('empName');
+    const empJob = document.getElementById('empJob');
+    const empStatusLine = document.getElementById('empStatusLine');
+    const recentList = document.getElementById('recentList');
+    const companySelect = document.getElementById('companySelect');
+    const reportBody = document.getElementById('reportBody');
+    const todayLabel = document.getElementById('todayLabel');
+    const statPresent = document.getElementById('statPresent');
+    const statLate = document.getElementById('statLate');
+    const statOut = document.getElementById('statOut');
+    const statEarly = document.getElementById('statEarly');
+    const exportCSV = document.getElementById('exportCSV');
+    const flash = document.getElementById('flash');
+    const toggleViewBtn = document.getElementById('toggleViewBtn');
+    const reopenCamBtn = document.getElementById('reopenCam');
+    const qrCanvas = document.getElementById('qrCanvas');
+
+    // Chart
+    const ctx1 = document.getElementById('chart').getContext('2d');
+    let chart = new Chart(ctx1, {
+      type: 'bar',
+      data: { labels: [], datasets: [{ label: 'حضور يومي', data: [], borderRadius: 6 }] },
+      options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } } }
+    });
+
+    // helpers
+    function showFlash(msg, timeout = 2200){ flash.innerText = msg; flash.classList.add('show'); setTimeout(()=>flash.classList.remove('show'), timeout); }
+    function nowISODate(){ return new Date().toISOString().split('T')[0]; }
+    function nowTime24(){ return new Date().toLocaleTimeString('en-GB', { hour12:false }); } // HH:MM:SS
+    function parseTime(t){ if(!t) return null; const p=t.trim().split(':'); if(p.length>=2){const hh=+p[0]||0,mm=+p[1]||0,ss=+p[2]||0; return hh*3600+mm*60+ss;} return null; }
+    function compareTimeStrings(a,b){ const pa=parseTime(a), pb=parseTime(b); return pa-pb; }
+    function escapeHtml(s){ if(!s) return ''; return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+    // realtime clock
+    function tickClock(){
+      const d=new Date();
+      bigClock.textContent = d.toLocaleTimeString('ar-EG',{hour12:false});
+      bigDate.textContent  = d.toLocaleDateString('ar-EG',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+    }
+    setInterval(tickClock,1000); tickClock();
+
+    // Load companies
+    onValue(ref(database,'companies'), snap=>{
+      companySelect.innerHTML = '<option value="">-- اختر الشركة --</option>';
+      if(!snap.exists()) return;
+      snap.forEach(ch=>{
+        const d = ch.val();
+        const opt = document.createElement('option');
+        opt.value = d.code || ch.key;
+        opt.textContent = d.name || d.code || ch.key;
+        companySelect.appendChild(opt);
+      });
+    });
+
+    async function getCompanyTimes(companyCode){
+      if(!companyCode) return { start:'08:00:00', end:'17:00:00' };
+      const s = await get(ref(database, `basicDefinitions/${companyCode}`));
+      if(!s.exists()) return { start:'08:00:00', end:'17:00:00' };
+      const v = s.val();
+      const sT = (v.start_time || '08:00'); const eT = (v.end_time || '17:00');
+      return { start: sT.length<=5 && sT.includes(':') ? sT+':00' : sT, end: eT.length<=5 && eT.includes(':') ? eT+':00' : eT };
+    }
+
+    // Employee preview
+    async function loadEmployee(code){
+      if(!code){ empPreview.style.display='none'; return; }
+      const s = await get(ref(database, `hrEmployees/${code}`));
+      if(s.exists()){
+        const emp = s.val();
+        empPreview.style.display='flex';
+        empPhoto.src = emp.photoURL || emp.photo || 'https://via.placeholder.com/120x120?text=EMP';
+        empName.textContent = emp.fullName || emp.name || '---';
+        empJob.textContent  = (emp.job?.jobTitle && emp.job?.dept) ? `${emp.job.jobTitle} • ${emp.job.dept}` : (emp.job?.jobTitle || emp.job?.dept || 'غير محدد');
+      }else{
+        empPreview.style.display='flex';
+        empPhoto.src = 'https://via.placeholder.com/120x120?text=?';
+        empName.textContent = `كود: ${code}`;
+        empJob.textContent = 'لم يتم العثور على بيانات';
+      }
+    }
+
+    // Save attendance (atomic multi-path update)
+    async function saveAttendance(code, companyCode, type){
+      if(!code) return showFlash('⚠️ ادخل كود الموظف');
+      if(!companyCode) return showFlash('⚠️ اختر الشركة');
+
+      const today = nowISODate();
+      const time  = nowTime24();
+      const times = await getCompanyTimes(companyCode);
+
+      let status = '';
+      if(type==='checkIn'){
+        status = compareTimeStrings(time, times.start) > 0 ? '⏰ متأخر' : '✅ في الميعاد';
+      }else{
+        status = compareTimeStrings(time, times.end) < 0 ? '⏰ انصراف مبكر' : '🚪 عادي';
+      }
+
+      const base = `attendance/${today}/${code}`;
+      const payload = {};
+      payload[`${base}/${type}`] = { time, status, companyCode };
+      payload[`${base}/lastUpdate`] = { time, type, status, ts: Date.now() };
+
+      await update(ref(database), payload);
+
+      showFlash(`${status} • ${code} • ${time}`, 2000);
+      playTone(type);
+      loadEmployee(code);
+      empStatusLine.textContent = `${type==='checkIn'?'دخول':'خروج'}: ${time} — ${status}`;
+    }
+
+    // UI actions
+    btnIn.addEventListener('click', async ()=>{
+      const code = manualCode.value.trim();
+      await saveAttendance(code, companySelect.value, 'checkIn');
+      manualCode.value='';
+    });
+    btnOut.addEventListener('click', async ()=>{
+      const code = manualCode.value.trim();
+      await saveAttendance(code, companySelect.value, 'checkOut');
+      manualCode.value='';
+    });
+    document.getElementById('clearPreview').addEventListener('click', ()=>{
+      manualCode.value=''; empPreview.style.display='none'; empStatusLine.textContent='';
+    });
+
+    function playTone(type){
+      try{
+        const audio = new Audio(type==='checkIn'
+          ? 'https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg'
+          : 'https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg');
+        audio.volume=.6; audio.play();
+      }catch(e){}
+    }
+
+    // Today view (recent + report + chart)
+    async function refreshTodayView(){
+      const today = nowISODate();
+      const s = await get(ref(database, `attendance/${today}`));
+
+      if(!s.exists()){
+        recentList.innerHTML = '<div style="opacity:.8">لا توجد بيانات لليوم</div>';
+        reportBody.innerHTML = '';
+        statPresent.innerText = '0'; statLate.innerText = '0'; statOut.innerText = '0'; statEarly.innerText = '0';
+        chart.data.labels = []; chart.data.datasets[0].data = []; chart.update();
+        return;
+      }
+
+      const data = s.val();
+      const rows = [];
+      let present=0, late=0, out=0, early=0;
+
+      for(const [code, rec] of Object.entries(data)){
+        const cin  = rec.checkIn?.time || '-';
+        const cins = rec.checkIn?.status || '-';
+        const cout = rec.checkOut?.time || '-';
+        const couts= rec.checkOut?.status || '-';
+        rows.push({ code, cin, cins, cout, couts });
+        if(cin && cin!=='-') present++;
+        if(cins && cins.includes('متأخر')) late++;
+        if(cout && cout!=='-') out++;
+        if(couts && couts.includes('مبكر')) early++;
+      }
+
+      const recent = Object.entries(data).map(([code, rec])=>{
+        const lu = rec.lastUpdate;
+        return { code, in: rec.checkIn?.time || '-', out: rec.checkOut?.time || '-', lu: lu?.ts || 0, status: lu?.status || '' };
+      }).sort((a,b)=>b.lu-a.lu).slice(0,8);
+
+      recentList.innerHTML = recent.map(r=>(
+        `<div style="padding:6px 0;border-bottom:1px dashed rgba(255,255,255,.03)">
+          ${r.code} — دخول: ${r.in} — خروج: ${r.out}
+          <div style="opacity:.85">${r.status}</div>
+        </div>`
+      )).join('');
+
+      // اسم الموظف (يُجلب عند العرض لتقليل الاستعلامات)
+      async function getName(code){
+        const sn = await get(ref(database, `hrEmployees/${code}/fullName`));
+        return sn.exists()? sn.val() : code;
+      }
+      // املأ الجدول مع أسماء حقيقية
+      const namesMap = {};
+      await Promise.all(rows.map(async r=>{ namesMap[r.code]=await getName(r.code); }));
+
+      reportBody.innerHTML = rows.map(r=>(
+        `<tr>
+          <td>${escapeHtml(namesMap[r.code] || r.code)}</td>
+          <td>${r.code}</td>
+          <td>${r.cin}</td>
+          <td style="color:${r.cins.includes('متأخر')?'var(--red)':'var(--green)'}">${r.cins}</td>
+          <td>${r.cout}</td>
+          <td style="color:${r.couts.includes('مبكر')?'var(--orange)':'var(--green)'}">${r.couts}</td>
+        </tr>`
+      )).join('');
+
+      statPresent.innerText = present;
+      statLate.innerText    = late;
+      statOut.innerText     = out;
+      statEarly.innerText   = early;
+
+      // الرسم لآخر 7 أيام
+      const labels=[]; const counts=[];
+      for(let i=6;i>=0;i--){
+        const d = new Date(); d.setDate(d.getDate() - i);
+        const key = d.toISOString().split('T')[0];
+        labels.push(d.toLocaleDateString('ar-EG',{day:'numeric',month:'short'}));
+        const sday = await get(ref(database, `attendance/${key}`));
+        counts.push(sday.exists()? Object.keys(sday.val()).length : 0);
+      }
+      chart.data.labels = labels; chart.data.datasets[0].data = counts; chart.update();
+    }
+
+    // CSV export
+    exportCSV.addEventListener('click', async ()=>{
+      const today = nowISODate();
+      const s = await get(ref(database, `attendance/${today}`));
+      if(!s.exists()){ showFlash('لا توجد بيانات للتصدير'); return; }
+      const data = s.val();
+      const rows = [];
+      rows.push(['employeeCode','employeeName','checkIn','checkInStatus','checkOut','checkOutStatus','company'].join(','));
+      for(const [code, rec] of Object.entries(data)){
+        const sn = await get(ref(database, `hrEmployees/${code}/fullName`));
+        const name = sn.exists()? sn.val(): code;
+        const cin  = rec.checkIn?.time || '';
+        const cins = rec.checkIn?.status || '';
+        const cout = rec.checkOut?.time || '';
+        const couts= rec.checkOut?.status || '';
+        const comp = rec.checkIn?.companyCode || rec.checkOut?.companyCode || '';
+        rows.push([code, `"${String(name).replace(/"/g,'""')}"`, cin, `"${cins}"`, cout, `"${couts}"`, comp].join(','));
+      }
+      const csv = rows.join('\n');
+      const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download=`attendance_${today}.csv`; a.click();
+      URL.revokeObjectURL(url);
+      showFlash('✅ تم تنزيل CSV');
+    });
+
+    // Toggle dashboard
+    let adminShown = true;
+    toggleViewBtn.addEventListener('click', ()=>{
+      adminShown = !adminShown;
+      document.querySelector('.dashboard').style.display = adminShown ? 'flex' : 'none';
+      toggleViewBtn.textContent = adminShown ? 'عرض Kiosk فقط' : 'لوحة المدير';
+    });
+
+    // Camera & QR scanning
+    let stream=null, scanning=false;
+    async function startCamera(){
+      try{
+        if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+        const constraints = { video:{ facingMode:'environment', width:{ideal:640}, height:{ideal:480} } };
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        scanning = true;
+        systemStatus.innerText = 'كاميرا متصلة - قارئ QR مُفعل';
+      }catch(e){
+        systemStatus.innerText = 'لم يتم تفعيل الكاميرا (تأكد من HTTPS والصلاحيات)';
+        scanning = false;
+        console.warn('camera error', e);
+      }
+      requestAnimationFrame(tickQRCode);
+    }
+    reopenCamBtn.addEventListener('click', ()=>startCamera());
+
+    // QR decoding (من إطار الفيديو)
+    const off = document.createElement('canvas');
+    const offctx = off.getContext('2d');
+    let coolDown = 0;
+
+    async function tickQRCode(){
+      if(scanning && video.readyState===video.HAVE_ENOUGH_DATA){
+        off.width = video.videoWidth; off.height = video.videoHeight;
+        offctx.drawImage(video,0,0,off.width,off.height);
+        const imgd = offctx.getImageData(0,0,off.width,off.height);
+        const res = jsQR(imgd.data, imgd.width, imgd.height, { inversionAttempts:"attemptBoth" });
+        if(res && Date.now()>coolDown){
+          coolDown = Date.now()+1500; // منع التكرار
+          handleScanned(res.data);
+        }
+      }
+      requestAnimationFrame(tickQRCode);
+    }
+
+    async function handleScanned(payload){
+      let code = payload;
+      let companyFromQr = null;
+      try{
+        const parsed = JSON.parse(payload);
+        if(parsed.code) code = parsed.code;
+        if(parsed.company) companyFromQr = parsed.company;
+      }catch(e){}
+      manualCode.value = code;
+      if(companyFromQr) companySelect.value = companyFromQr;
+      await loadEmployee(code);
+      showFlash('تم قراءة QR → ' + code, 1800);
+    }
+
+    // تزامن دوري
+    setInterval(refreshTodayView, 5000);
+    refreshTodayView();
+    startCamera();
+
+    // إدخال يدوي = معاينة فورية
+    manualCode.addEventListener('input', ()=>loadEmployee(manualCode.value.trim()));
+
+    // تحديث عنوان اليوم عند تغيير الشركة
+    companySelect.addEventListener('change', ()=>{
+      const c = companySelect.options[companySelect.selectedIndex]?.text || '';
+      todayLabel.innerText = `اليوم - ${c || 'جميع الشركات'}`;
+      refreshTodayView();
+    });
+
+    // QR تجريبي ديناميكي (للطباعة في البطاقات لاحقًا)
+    function generateDynamicQR(employeeCode){
+      const payload = { code: employeeCode, ts: Math.floor(Date.now()/3000) };
+      QRCode.toCanvas(qrCanvas, JSON.stringify(payload), { width:160 }, (err)=>{ if(err) console.error(err); });
+    }
+    let currentCode = "EMP123";
+    setInterval(()=>generateDynamicQR(currentCode), 3000);
+    generateDynamicQR(currentCode);
+  </script>
+</body>
+</html>
